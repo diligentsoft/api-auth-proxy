@@ -1,0 +1,12 @@
+server:
+  port : 8080
+
+api-auth-proxy:
+  host: 'localhost:${server.port}'
+  forward-signing:
+    enabled: false
+    authorization: {}
+  resource-protection:
+    enabled: false
+    baseUrl: ''
+    paths: []

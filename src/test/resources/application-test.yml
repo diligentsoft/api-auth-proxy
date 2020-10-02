@@ -1,0 +1,6 @@
+
+api-auth-proxy:
+  forward-signing:
+    enabled: true
+  resource-protection:
+    enabled: true
