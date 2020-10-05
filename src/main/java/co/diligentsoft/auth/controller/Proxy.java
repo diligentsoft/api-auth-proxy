@@ -92,7 +92,6 @@ public class Proxy {
 
     /**
      * Adds Authorisation to request
-     * TODO: Call OAuth server to get access token
      */
     private ResponseEntity<String> handleForwardProxyMode(RequestEntity request, HttpServletRequest servletRequest) {
         log.info("Forward proxying request to host {} for {}", request.getHeaders().getHost().getHostName(), servletRequest.getRemoteAddr());
@@ -109,7 +108,6 @@ public class Proxy {
 
     /**
      * Ensures Authorisation in request
-     * TODO: Verify access token is signed by OAuth server and not expired
      */
     private ResponseEntity<String> handleReverseProxyMode(RequestEntity request, HttpServletRequest servletRequest) {
         log.info("Reverse proxying request to host {} for {}", request.getHeaders().getHost().getHostName(), servletRequest.getRemoteAddr());
