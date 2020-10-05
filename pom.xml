@@ -102,7 +102,7 @@
               <goal>build</goal>
             </goals>
             <configuration>
-              <repository>${project.artifactId}</repository>
+              <repository>diligentsoft/${project.artifactId}</repository>
               <buildArgs>
                 <JAR_FILENAME>${project.build.finalName}.jar</JAR_FILENAME>
               </buildArgs>
