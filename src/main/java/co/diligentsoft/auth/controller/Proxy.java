@@ -1,7 +1,10 @@
 package co.diligentsoft.auth.controller;
 
 import java.net.URI;
-import java.util.UUID;
+import java.net.URL;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Optional;
 
 import javax.servlet.http.HttpServletRequest;
 
@@ -16,6 +19,29 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import com.nimbusds.jose.JOSEObjectType;
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.jwk.source.JWKSource;
+import com.nimbusds.jose.jwk.source.RemoteJWKSet;
+import com.nimbusds.jose.proc.DefaultJOSEObjectTypeVerifier;
+import com.nimbusds.jose.proc.JWSKeySelector;
+import com.nimbusds.jose.proc.JWSVerificationKeySelector;
+import com.nimbusds.jose.proc.SecurityContext;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.proc.ConfigurableJWTProcessor;
+import com.nimbusds.jwt.proc.DefaultJWTClaimsVerifier;
+import com.nimbusds.jwt.proc.DefaultJWTProcessor;
+import com.nimbusds.oauth2.sdk.ClientCredentialsGrant;
+import com.nimbusds.oauth2.sdk.ErrorObject;
+import com.nimbusds.oauth2.sdk.TokenRequest;
+import com.nimbusds.oauth2.sdk.TokenResponse;
+import com.nimbusds.oauth2.sdk.auth.ClientSecretPost;
+import com.nimbusds.oauth2.sdk.auth.Secret;
+import com.nimbusds.oauth2.sdk.http.HTTPResponse;
+import com.nimbusds.oauth2.sdk.id.ClientID;
+import com.nimbusds.oauth2.sdk.token.AccessToken;
+
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
 @RestController
@@ -73,7 +99,10 @@ public class Proxy {
 
         HttpHeaders newHeaders = new HttpHeaders();
         newHeaders.add("X-Forwarded-For", servletRequest.getRemoteAddr());
-        newHeaders.add(HttpHeaders.AUTHORIZATION, UUID.randomUUID().toString());
+
+        final String accessToken = getAccessToken().getValue();
+        newHeaders.add(HttpHeaders.AUTHORIZATION, String.format("Bearer %s", accessToken));
+
         final RequestEntity forwardRequest = requestEntity(request, newHeaders, request.getUrl());
         return restTemplate.exchange(forwardRequest, String.class);
     }
@@ -85,7 +114,7 @@ public class Proxy {
     private ResponseEntity<String> handleReverseProxyMode(RequestEntity request, HttpServletRequest servletRequest) {
         log.info("Reverse proxying request to host {} for {}", request.getHeaders().getHost().getHostName(), servletRequest.getRemoteAddr());
 
-        if (request.getHeaders().containsKey(HttpHeaders.AUTHORIZATION)) {
+        if (accessTokenValid(request)) {
             final RequestEntity forwardRequest = requestEntity(request, HttpHeaders.EMPTY, urlForProtectedResource(request));
             return restTemplate.exchange(forwardRequest, String.class);
         } else {
@@ -115,5 +144,73 @@ public class Proxy {
             .port(protectedHostBaseUrl.getPort())
             .build()
             .toUri();
+    }
+
+    @SneakyThrows
+    private AccessToken getAccessToken() {
+        final HTTPResponse response = new TokenRequest(
+            URI.create("http://keycloak:8080/auth/realms/development/protocol/openid-connect/token"),
+            new ClientSecretPost(new ClientID("oauth-client"), new Secret("**********")),
+            new ClientCredentialsGrant()
+        ).toHTTPRequest().send();
+        final TokenResponse tokenResponse = TokenResponse.parse(response);
+        if (tokenResponse.indicatesSuccess()) {
+            log.info("Successfully got access token");
+            return tokenResponse.toSuccessResponse().getTokens().getAccessToken();
+        } else {
+            final ErrorObject errorObject = tokenResponse.toErrorResponse().getErrorObject();
+            final String errorMsg = String.format("Error when getting access token; error code is %s with description %s", errorObject.getCode(),
+                errorObject.getDescription());
+            log.error(errorMsg);
+            throw new RuntimeException(errorMsg);
+        }
+    }
+
+    @SneakyThrows
+    private boolean accessTokenValid(RequestEntity request) {
+
+        final Optional<String> accessToken = Optional.ofNullable(request.getHeaders().get(HttpHeaders.AUTHORIZATION))
+            .map(headerValues -> headerValues.get(0).replace("Bearer ", ""));
+
+        // Create a JWT processor for the access tokens
+        ConfigurableJWTProcessor<SecurityContext> jwtProcessor =
+            new DefaultJWTProcessor<>();
+
+        // Set the required "typ" header "at+jwt" for access tokens issued by the
+        // Connect2id server, may not be set by other servers
+        jwtProcessor.setJWSTypeVerifier(
+            new DefaultJOSEObjectTypeVerifier<>(new JOSEObjectType("JWT")));
+
+        // The public RSA keys to validate the signatures will be sourced from the
+        // OAuth 2.0 server's JWK set, published at a well-known URL. The RemoteJWKSet
+        // object caches the retrieved keys to speed up subsequent look-ups and can
+        // also handle key-rollover
+        JWKSource<SecurityContext> keySource =
+            new RemoteJWKSet<>(new URL("http://keycloak:8080/auth/realms/development/protocol/openid-connect/certs"));
+
+        // The expected JWS algorithm of the access tokens (agreed out-of-band)
+        JWSAlgorithm expectedJWSAlg = JWSAlgorithm.RS256;
+
+        // Configure the JWT processor with a key selector to feed matching public
+        // RSA keys sourced from the JWK set URL
+        JWSKeySelector<SecurityContext> keySelector =
+            new JWSVerificationKeySelector<>(expectedJWSAlg, keySource);
+
+        jwtProcessor.setJWSKeySelector(keySelector);
+
+        // Set the required JWT claims for access tokens issued by the Connect2id
+        // server, may differ with other servers
+        jwtProcessor.setJWTClaimsSetVerifier(new DefaultJWTClaimsVerifier(
+            new JWTClaimsSet.Builder().issuer("http://keycloak:8080/auth/realms/development").build(),
+            new HashSet<>(Arrays.asList("sub", "iat", "exp", "scope", "clientId", "jti"))));
+
+        // Process the token
+        SecurityContext ctx = null; // optional context parameter, not required here
+        JWTClaimsSet claimsSet = jwtProcessor.process(accessToken.get(), ctx);
+
+        // Print out the token claims set
+        System.out.println(claimsSet.toJSONObject());
+
+        return accessToken.isPresent();
     }
 }
