@@ -18,3 +18,4 @@ by operating in forward and reverse proxy modes.
  * Authorisation checks on URL paths and HTTP methods
  * Comprehensive configuration - all parameters used in token operations externalised as configuration properties
  * Auto-discovery of token and key endpoints using well-known OAuth config URL
+ * Review and implement good practice (for proxies) around handling of request and response headers
