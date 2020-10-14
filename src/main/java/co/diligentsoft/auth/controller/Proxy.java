@@ -51,6 +51,9 @@ public class Proxy {
     @Value("${api-auth-proxy.host}")
     private String selfHost;
 
+    @Value("${api-auth-proxy.forward-signing.enabled}")
+    private boolean forwardSigningEnabled;
+
     @Value("${api-auth-proxy.resource-protection.enabled}")
     private boolean resourceProtectionEnabled;
 
@@ -99,8 +102,10 @@ public class Proxy {
         HttpHeaders newHeaders = new HttpHeaders();
         newHeaders.add("X-Forwarded-For", servletRequest.getRemoteAddr());
 
-        final String accessToken = getAccessToken().getValue();
-        newHeaders.add(HttpHeaders.AUTHORIZATION, String.format("Bearer %s", accessToken));
+        if (forwardSigningEnabled) {
+            final String accessToken = getAccessToken().getValue();
+            newHeaders.add(HttpHeaders.AUTHORIZATION, String.format("Bearer %s", accessToken));
+        }
 
         final RequestEntity forwardRequest = requestEntity(request, newHeaders, request.getUrl());
         return restTemplate.exchange(forwardRequest, String.class);
